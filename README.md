@@ -12,7 +12,7 @@ This repository contains all files for my personal term project for CS 1675 Intr
 - Multivariate Additive Regression Splines (MARS) 
 
 ## Contents
-- Data_Exploration.HTML
+- Data_Exploration.Rmd
 - Bayesian_Linear_Models.Rmd 
 - Binary Classification Accuracy.Rmd 
 - Binary Classification ROC.Rmd 
