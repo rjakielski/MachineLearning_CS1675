@@ -1,0 +1,163 @@
+---
+title: "Rachel Jakielski CS1675 Final Project 01"
+output: html_document
+---
+
+***PART TWO: Linear Models***
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r cars}
+library(tidyverse)
+
+library(caret)
+
+library(coefplot)
+
+library(splines)
+```
+
+
+```{r, base_data}
+df<- readr::read_csv("cs_1675_fall2021_finalproject.csv", col_names = TRUE)
+df <- df %>% 
+      mutate(y = boot::logit(output)) 
+df <- subset(df, select = -output)
+
+glimpse(df)
+```
+
+```{r, derived_data}
+derived_df <- df %>% 
+              mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+                     w = x2 / (x3 + x4),
+                     z = (x1 + x2) / (x5 + x4),
+                     t = v1 * v2) %>% 
+              glimpse()
+```
+
+# Base Feature Models: 
+
+
+```{r, base_linear_additive}
+lm_base_additive <- lm(y ~ (.), 
+                   data = df)
+
+#coefplot(fit_lm_01)
+fit_lm_01_performance <- broom::glance(lm_base_additive)
+```
+
+```{r, base_interaction}
+lm_base_interaction <- lm(y ~ m*(.), 
+                   data = df)
+#coefplot(fit_lm_02)
+fit_lm_02_performance <- broom::glance(lm_base_interaction)
+```
+
+```{r, base_pairwise}
+lm_base_pairwise <- lm(y ~ (.)^2, 
+                   data = df)
+#coefplot(fit_lm_03)
+fit_lm_03_performance <- broom::glance(lm_base_pairwise)
+```
+
+# Expanded Feature Models: 
+
+```{r, expand_linear_additive}
+lm_expanded_additive <- lm(y ~ (.-x4-v1), 
+                   data = derived_df)
+#coefplot(expanded_lm_01)
+expanded_lm_01_performace <- broom::glance(lm_expanded_additive)
+```
+
+```{r, expand_interaction}
+lm_expanded_interaction <- lm(y ~ m*(.-x4-v1), 
+                   data = derived_df)
+
+#coefplot(expanded_lm_02)
+expanded_lm_02_performace <- broom::glance(lm_base_interaction)
+```
+
+```{r, expanded_pairwise}
+lm_expanded_pairwise <- lm(y ~ (.-x4-v1-m)^2, 
+                   data = derived_df)
+
+#coefplot(expanded_lm_03)
+expanded_lm_03_performace <- broom::glance(lm_expanded_pairwise)
+```
+
+# Linear Basis Function Models: 
+
+```{r, lb_01}
+lbm_01 <- lm(y ~ x1*(.-x4-v1-w), data = derived_df)
+#coefplot(lbm_01)
+lbm_01_performace <- broom::glance(lbm_01)
+```
+
+```{r, lb_02}
+lbm_02 <- lm(y ~ splines::ns(x1,df=4) * (w+z+x2+x3), 
+                 data = derived_df)
+#coefplot(lbm_02)
+lbm_02_performace <- broom::glance(lbm_02)
+```
+
+```{r, lb_03}
+lbm_03 <- lm(y ~ m*(. -v1 -v2 -v3 -v4 -v5 -x4), 
+                 data = derived_df)
+#coefplot(lbm_03)
+lbm_03_performace <- broom::glance(lbm_03)
+```
+
+# Model Analysis: 
+
+```{r, performance_df}
+performance_list <- list(fit_lm_01_performance, fit_lm_02_performance, fit_lm_03_performance, expanded_lm_01_performace, expanded_lm_02_performace, expanded_lm_03_performace, lbm_01_performace, lbm_02_performace, lbm_03_performace)
+
+rnames = c("base_1", "base_2", "base_3", "expanded_1", "expanded_2","expanded_3", "basis_1", "basis_2", "basis_3")
+      
+performance_df <- do.call(rbind.data.frame,performance_list)
+
+performance_df
+```
+
+
+According to AIC and BIC, the best 3 models are: 
+
+1. lbm_02, splines::ns(x1,df=4) * (w+z+x2+x3) (model #8) 
+
+2. lm_expanded_pairwise, y ~ (.-x4-v1-m)^2 (model #6) 
+
+3. lbm_01, y ~ x1*(.-x4-v1-w) (model #7) 
+ 
+
+```{r}
+
+coefplot(lbm_02)
+
+```
+
+```{r}
+
+coefplot(lm_expanded_pairwise)
+
+```
+
+```{r}
+
+coefplot(lbm_01)
+
+```
+
+# Comparison of coefficient plots for the top 3 models: 
+
+All models indicate x1 and x2 as especially significant. The manufacturing process inputs, v1:v5, behave similarly across models lbm_01 and lm_expanded_pairwise. Interactions with the manufacturing processes have a comparable behavior to these inputs alone. The expanded features, t & z, also show similar behavior across the top 3 models. 
+
+Saving Best Model: 
+
+```{r, save_models}
+lbm_02 %>% readr::write_rds("BASIS_2.rds")
+```
+
+

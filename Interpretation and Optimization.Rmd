@@ -1,0 +1,271 @@
+---
+title: "Rachel Jakielski CS1675 Final Project"
+output: html_document
+---
+
+***Interpretation and Optimization***
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(caret)
+```
+
+Importing Data: 
+
+
+```{r, derived_data}
+df<- readr::read_csv("cs_1675_fall2021_finalproject.csv", col_names = TRUE) %>% 
+      mutate(y = boot::logit(output)) %>% 
+      mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+                     w = x2 / (x3 + x4),
+                     z = (x1 + x2) / (x5 + x4),
+                     t = v1 * v2) 
+
+class_df <- df %>% mutate(outcome = ifelse(output < 0.33, 'event', 'non_event'),
+              outcome = factor(outcome, levels = c("event", "non_event"))) %>% 
+              subset(select = c(-output, -y)) %>% glimpse()
+
+derived_df <- df %>% subset(select = -output)%>% glimpse()
+
+```
+
+
+Importing Best Performing Models:
+
+```{r}
+#Regression
+xgb_reg <- readr::read_rds("XGB_EXPANDED.rds")
+
+xgb_tuned_reg <- readr::read_rds("XGB_EXPANDED_TUNED.rds")
+
+MARS_reg <- readr::read_rds("MARS.rds")
+
+#Classification
+xgb_tuned_class <- readr::read_rds("XGB_EXPANDED_TUNED_ACC.rds")
+
+xgb_class <- readr::read_rds("XGB_EXPANDED_ACC.rds")
+
+rf_class <- readr::read_rds("RF_EXPANDED_ACC.rds")
+```
+
+
+
+# Does Model Performance improve when the derived features are included?
+
+As model performance has been ranked with each model type (regression, classification, fitting linear models, etc.), the general trend is that models using the expanded feature set have consistently outperformed their counterparts that use the base feature set alone. 
+
+# Identifying the most important variables: 
+
+Regression: 
+
+```{r}
+xgb_reg %>% varImp() %>% plot()
+```
+```{r}
+xgb_tuned_reg %>% varImp() %>% plot()
+```
+```{r}
+MARS_reg %>% varImp() %>% plot()
+```
+
+
+Classification: 
+
+```{r}
+xgb_tuned_class %>% varImp() %>% plot()
+```
+```{r}
+xgb_class %>% varImp() %>% plot()
+```
+```{r}
+rf_class %>% varImp() %>% plot()
+```
+
+x1, w, and z were the most important features across all top performing models. X5 was also considerably important in the random forest regression model. 
+
+
+Viz grids for regression models: 
+
+```{r}
+#x1 as primary input
+reg_grid_x1 <- expand.grid(x1 = seq(min(derived_df$x1),
+                                       max(derived_df$x1),
+                                       length.out = 500),
+                       x2 = median(derived_df$x2),
+                       x5 = median(derived_df$x5),
+                       w = median(derived_df$w),
+                       z = median(derived_df$z),
+                       m = c("A","B","C","D","E"),
+                       KEEP.OUT.ATTRS = FALSE,
+                       stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as.tibble()
+```
+
+```{r}
+#x1 as primary input
+reg_grid_z <- expand.grid(z = seq(min(derived_df$z),
+                                       max(derived_df$z),
+                                       length.out = 500),
+                       x2 = median(derived_df$x2),
+                       x5 = median(derived_df$x5),
+                       w = median(derived_df$w),
+                       x1 = median(derived_df$x1),
+                       m = c("A","B","C","D","E"),
+                       KEEP.OUT.ATTRS = FALSE,
+                       stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as.tibble()
+```
+
+```{r}
+#x1 as primary input
+reg_grid_w <- expand.grid(w = seq(min(derived_df$w),
+                                       max(derived_df$w),
+                                       length.out = 500),
+                       x2 = median(derived_df$x2),
+                       x5 = median(derived_df$x5),
+                       z = median(derived_df$z),
+                       x1 = median(derived_df$x1),
+                       m = c("A","B","C","D","E"),
+                       KEEP.OUT.ATTRS = FALSE,
+                       stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as.tibble()
+```
+
+
+Viz grids for classification models: 
+
+```{r}
+#x1 as primary input
+class_grid_x1 <- expand.grid(x1 = seq(min(class_df$x1),
+                                       max(class_df$x1),
+                                       length.out = 500),
+                       x2 = median(class_df$x2),
+                       x5 = median(class_df$x5),
+                       w = median(class_df$w),
+                       z = median(class_df$z),
+                       m = c("A","B","C","D","E"),
+                       KEEP.OUT.ATTRS = FALSE,
+                       stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as.tibble()
+```
+
+```{r}
+#x1 as primary input
+class_grid_z <- expand.grid(z = seq(min(class_df$z),
+                                       max(class_df$z),
+                                       length.out = 500),
+                       x2 = median(class_df$x2),
+                       x5 = median(class_df$x5),
+                       w = median(class_df$w),
+                       x1 = median(class_df$x1),
+                       m = c("A","B","C","D","E"),
+                       KEEP.OUT.ATTRS = FALSE,
+                       stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as.tibble()
+```
+
+```{r}
+#x1 as primary input
+class_grid_w <- expand.grid(w = seq(min(class_df$w),
+                                       max(class_df$w),
+                                       length.out = 500),
+                       x2 = median(class_df$x2),
+                       x5 = median(class_df$x5),
+                       z = median(class_df$z),
+                       x1 = median(class_df$x1),
+                       m = c("A","B","C","D","E"),
+                       KEEP.OUT.ATTRS = FALSE,
+                       stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as.tibble()
+```
+
+# Visualizing y as a function of the most important variables: 
+
+```{r}
+
+pred_xgb_tuned_reg_x1 <- predict(xgb_tuned_reg, reg_grid_x1)
+
+pred_xgb_tuned_reg_x1
+
+bind_cols(pred_xgb_tuned_reg_x1, reg_grid_x1) %>% ggplot(mapping = aes(x=x1, y=pred_xgb_tuned_reg_x1)) + geom_point() + facet_wrap(~m)
+
+pred_xgb_tuned_reg_z <- predict(xgb_tuned_reg, reg_grid_z)
+bind_cols(pred_xgb_tuned_reg_z, reg_grid_z) %>% ggplot(mapping = aes(x=z, y=pred_xgb_tuned_reg_z)) + geom_point() + facet_wrap(~m)
+
+pred_xgb_tuned_reg_w <- predict(xgb_tuned_reg, reg_grid_w)
+bind_cols(pred_xgb_tuned_reg_w, reg_grid_w) %>% ggplot(mapping = aes(x=w, y=pred_xgb_tuned_reg_w)) + geom_point() + facet_wrap(~m)
+
+```
+
+```{r}
+pred_xgb_reg_x1 <- predict(xgb_reg, reg_grid_x1)
+bind_cols(pred_xgb_reg_x1, reg_grid_x1) %>% ggplot(mapping = aes(x=x1, y=pred_xgb_reg_x1)) + geom_point() + facet_wrap(~m)
+
+pred_xgb_reg_z <- predict(xgb_reg, reg_grid_z)
+bind_cols(pred_xgb_reg_z, reg_grid_z) %>% ggplot(mapping = aes(x=z, y=pred_xgb_reg_z)) + geom_point() + facet_wrap(~m)
+
+pred_xgb_reg_w <- predict(xgb_reg, reg_grid_w)
+bind_cols(pred_xgb_reg_w, reg_grid_w) %>% ggplot(mapping = aes(x=w, y=pred_xgb_reg_w)) + geom_point() + facet_wrap(~m)
+```
+
+
+```{r, make_predictions}
+pred_MARS_x1 <- predict(MARS_reg, reg_grid_x1)
+bind_cols(pred_MARS_x1, reg_grid_x1) %>% ggplot(mapping = aes(x=x1, y=pred_MARS_x1)) + geom_point() + facet_wrap(~m)
+
+pred_MARS_z <- predict(MARS_reg, reg_grid_z)
+bind_cols(pred_MARS_z, reg_grid_z) %>% ggplot(mapping = aes(x=z, y=pred_MARS_z)) + geom_point() + facet_wrap(~m)
+
+pred_MARS_w <- predict(MARS_reg, reg_grid_w)
+bind_cols(pred_MARS_w, reg_grid_w) %>% ggplot(mapping = aes(x=w, y=pred_MARS_w)) + geom_point() + facet_wrap(~m)
+```
+
+#Visualize the predicted probability of the EVENT as a function of the identified most important variables: 
+
+```{r}
+pred_xgb_tuned_class_x1 <- predict(xgb_tuned_class, class_grid_x1, type = 'prob')
+bind_cols(pred_xgb_tuned_class_x1$event, class_grid_x1) %>% ggplot(mapping = aes(x=x1, y=pred_xgb_tuned_class_x1$event)) + geom_point() + facet_wrap(~m)
+
+# 
+pred_xgb_tuned_class_z <- predict(xgb_tuned_class, class_grid_z, type = 'prob')
+bind_cols(pred_xgb_tuned_class_z$event, class_grid_z) %>% ggplot(mapping = aes(x=z, y=pred_xgb_tuned_class_z$event)) + geom_point() + facet_wrap(~m)
+
+
+pred_xgb_tuned_class_w <- predict(xgb_tuned_class, class_grid_w, type = 'prob')
+bind_cols(pred_xgb_tuned_class_w$event, class_grid_w) %>% ggplot(mapping = aes(x=w, y=pred_xgb_tuned_class_w $event)) + geom_point() + facet_wrap(~m)
+```
+```{r}
+pred_xgb_class_x1 <- predict(xgb_class, class_grid_x1, type = 'prob')
+bind_cols(pred_xgb_class_x1$event, class_grid_x1) %>% ggplot(mapping = aes(x=x1, y=pred_xgb_class_x1$event)) + geom_point() + facet_wrap(~m)
+# 
+pred_xgb_class_z <- predict(xgb_class, class_grid_z, type = 'prob')
+bind_cols(pred_xgb_class_z$event, class_grid_z) %>% ggplot(mapping = aes(x=z, y=pred_xgb_class_z$event)) + geom_point() + facet_wrap(~m)
+
+pred_xgb_class_w <- predict(xgb_class, class_grid_w, type = 'prob')
+bind_cols(pred_xgb_class_w$event, class_grid_w) %>% ggplot(mapping = aes(x=w, y=pred_xgb_class_w$event)) + geom_point() + facet_wrap(~m)
+```
+
+```{r}
+pred_rf_class_x1 <- predict(rf_class, class_grid_x1, type = 'prob')
+bind_cols(pred_rf_class_x1$event, class_grid_x1) %>% ggplot(mapping = aes(x=x1, y=pred_rf_class_x1$event)) + geom_point() + facet_wrap(~m)
+# 
+pred_rf_class_z <- predict(rf_class, class_grid_z, type = 'prob')
+bind_cols(pred_rf_class_z$event, class_grid_z) %>% ggplot(mapping = aes(x=z, y=pred_rf_class_z$event)) + geom_point() + facet_wrap(~m)
+pred_rf_class_z
+
+pred_rf_class_w <- predict(rf_class, class_grid_w, type = 'prob')
+bind_cols(pred_rf_class_w $event, class_grid_w) %>% ggplot(mapping = aes(x=w, y=pred_rf_class_w$event)) + geom_point() + facet_wrap(~m)
+```
+
+# Inputs associated with minimizing y: 
+
+x1: ~2.5 
+
+z: ~2 
+
+w: 0.25 
+
+# Variance of optimal inputs across values of m: 
+
+No models show evidence that optimal inputs vary across machine (m). 

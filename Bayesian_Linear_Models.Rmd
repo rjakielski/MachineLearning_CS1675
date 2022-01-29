@@ -1,0 +1,211 @@
+---
+title: "Rachel Jakielski CS1675 Final Project"
+output: html_document
+---
+
+***PART TWO: Bayesian Models*** 
+
+```{r}
+library(bayesplot)
+library(rstanarm)
+library(tidyverse)
+library(coefplot)
+```
+
+
+```{r, base_data}
+df<- readr::read_csv("cs_1675_fall2021_finalproject.csv", col_names = TRUE)
+df <- df %>% 
+      mutate(y = boot::logit(output)) 
+df <- subset(df, select = -output)
+
+glimpse(df)
+```
+
+```{r, derived_data}
+derived_df <- df %>% 
+              mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+                     w = x2 / (x3 + x4),
+                     z = (x1 + x2) / (x5 + x4),
+                     t = v1 * v2) %>% 
+              glimpse()
+```
+
+```{r, model1_bayesian}
+mod1 <-  model.matrix(y ~ splines::ns(x1,df=4) * (w+z+x2+x3), data = derived_df)
+
+info_mod1_weak <- list(
+  yobs = df$y,
+  design_matrix = mod1,
+  mu_beta = 0,
+  tau_beta = 4,
+  sigma_rate = 1
+)
+```
+
+```{r, model2_bayesian}
+mod2 <-  model.matrix(y ~ x1*(.-x4-v1-w), data = derived_df)
+
+info_mod2_weak <- list(
+  yobs = df$y,
+  design_matrix = mod2,
+  mu_beta = 0,
+  tau_beta = 4,
+  sigma_rate = 1
+)
+```
+
+
+
+```{r, define_logpost}
+lm_logpost <- function(unknowns, my_info)
+{
+  length_beta <- ncol(my_info$design_matrix)
+  
+  beta_v <- unknowns[1:length_beta]
+  
+  lik_varphi <- unknowns[length_beta + 1]
+  
+  lik_sigma <- exp(lik_varphi)
+  
+  X <- my_info$design_matrix
+  
+  mu <- as.vector(X %*% as.matrix(beta_v))
+  
+  log_lik <- sum(dnorm(x = my_info$yobs,
+                       mean = mu,
+                       sd = lik_sigma,
+                       log = TRUE))
+  
+  log_prior_beta <- sum(dnorm(x = beta_v,
+                              mean = my_info$mu_beta,
+                              sd = my_info$tau_beta,
+                              log = TRUE))
+  
+  log_prior_sigma <- dexp(x = lik_sigma,
+                          rate = my_info$sigma_rate,
+                          log = TRUE)
+  
+  log_prior <- log_prior_beta + log_prior_sigma
+  
+  log_derive_adjust <- lik_varphi
+  
+  log_lik + log_prior + log_derive_adjust
+}
+```
+
+
+
+```{r, define_my_laplace}
+my_laplace <- function(start_guess, logpost_func, ...)
+{
+  # code adapted from the `LearnBayes`` function `laplace()`
+  fit <- optim(start_guess,
+               logpost_func,
+               gr = NULL,
+               ...,
+               method = "BFGS",
+               hessian = TRUE,
+               control = list(fnscale = -1, maxit = 1001))
+  
+  mode <- fit$par
+  post_var_matrix <- -solve(fit$hessian)
+  p <- length(mode)
+  int <- p/2 * log(2 * pi) + 0.5 * log(det(post_var_matrix)) + logpost_func(mode, ...)
+  # package all of the results into a list
+  list(mode = mode,
+       var_matrix = post_var_matrix,
+       log_evidence = int,
+       converge = ifelse(fit$convergence == 0,
+                         "YES", 
+                         "NO"),
+       iter_counts = as.numeric(fit$counts[1]))
+}
+```
+
+
+```{r, execute_laplace}
+bayes_lm_01 <- my_laplace(rep(0, ncol(mod1) + 1), lm_logpost, info_mod1_weak)
+bayes_lm_02 <- my_laplace(rep(0, ncol(mod2) + 1), lm_logpost, info_mod2_weak)
+```
+
+```{r, check_convergence}
+glimpse(bayes_lm_01)
+glimpse(bayes_lm_02)
+```
+
+
+
+```{r, make_coef_viz_function}
+viz_post_coefs <- function(post_means, post_sds, xnames)
+{
+  tibble::tibble(
+    mu = post_means,
+    sd = post_sds,
+    x = xnames
+  ) %>% 
+    mutate(x = factor(x, levels = xnames)) %>% 
+    ggplot(mapping = aes(x = x)) +
+    geom_hline(yintercept = 0, color = 'grey', linetype = 'dashed') +
+    geom_point(mapping = aes(y = mu)) +
+    geom_linerange(mapping = aes(ymin = mu - 2 * sd,
+                                 ymax = mu + 2 * sd,
+                                 group = x)) +
+    labs(x = 'feature', y = 'coefficient value') +
+    coord_flip() +
+    theme_bw()
+}
+```
+
+### Use the log evidence to identify the better of the models: 
+
+```{r, Bayes_Factor_Analysis}
+bayes_lm_01$log_evidence
+bayes_lm_02$log_evidence
+
+```
+
+The log-evidence indicated that bayes_lm_01 (the splines model) is the better of the two models that were tried. This is consistent with analysis of the non-Bayesian models that were analyzed using AIC/BIC. 
+
+
+## Visualize the posterior distributions on the coefficients: 
+
+```{r, viz_mod}
+viz_post_coefs(bayes_lm_01$mode[1:length(bayes_lm_01$mode)-1], sqrt(diag(bayes_lm_01$var_matrix))[1:length(sqrt(diag(bayes_lm_01$var_matrix)))-1], colnames(info_mod1_weak$design_matrix))
+```
+
+## The uncertainty on sigma: 
+
+
+```{r, read_lm}
+lbm_02 <- readr::read_rds("BASIS_2.rds")
+```
+
+
+```{r} 
+#bayes_lm_01, ncol(mod1), 500
+generate_lm_post_samples <- function(mvn_result, length_beta, num_samples)
+{
+  MASS::mvrnorm(n = num_samples,
+                mu = mvn_result$mode,
+                Sigma = mvn_result$var_matrix) %>% 
+    as.data.frame() %>% tibble::as_tibble() %>% 
+    purrr::set_names(c(sprintf("beta_%02d", 0:(length_beta-1)), "varphi")) %>% 
+    mutate(sigma = exp(varphi))
+}
+```
+
+```{r}
+post_samples<-generate_lm_post_samples(bayes_lm_01, ncol(mod1), 500)
+```
+
+```{r}
+as.data.frame(post_samples) %>% tibble::as_tibble() %>% 
+  ggplot(mapping = aes(x = sigma)) +
+  geom_histogram(bins = 55) +
+  geom_vline(xintercept = stats::sigma(lbm_02),
+             color = "red", linetype = "solid", size = 1.1) +
+  theme_bw()
+```
+
+The MLE (red vertical line) lies somewhat close to the mean on sigma. 

@@ -1,0 +1,379 @@
+---
+title: "Rachel Jakielski CS1675 Final Project"
+output: html_document
+---
+
+**PART THREE: Regression Models** 
+
+Note: Long iterations printed for GBTs 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(coefplot)
+library(ggplot2)
+```
+
+
+• Training and tuning the following models:
+
+• Linear models:
+•     Additive features using the “base feature” set
+•     Additive features using the “expanded feature” set
+•     Top ranked linear model from Part ii)
+•     Choice linear model from Part ii)
+
+• Regularized regression with Elastic net
+•     Interact the categorical variable with all pair-wise interactions of the continuous features.
+•     The most complex model tried in Part ii)
+
+
+• Neural network
+• Random forest
+• Gradient boosted tree
+• 2 methods not explicitly discussed in lecture
+
+
+### Reading in the data: 
+
+Base Features: 
+
+```{r, base_data}
+df<- readr::read_csv("cs_1675_fall2021_finalproject.csv", col_names = TRUE)
+df <- df %>% 
+      mutate(y = boot::logit(output)) 
+df <- subset(df, select = -output)
+
+glimpse(df)
+```
+
+Derived Features: 
+
+```{r, derived_data}
+derived_df <- df %>% 
+              mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+                     w = x2 / (x3 + x4),
+                     z = (x1 + x2) / (x5 + x4),
+                     t = v1 * v2) %>% 
+              glimpse()
+#glimpse(derived_df) #<- subset(derived_df, select = -output)
+```
+```{r, make_caret_info_setup}
+my_ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 5)
+
+my_metric <- "RMSE"
+```
+
+## Linear Models: 
+
+Additive features using the base feature set: 
+
+```{r}
+set.seed(825)
+fit_lm_base <- train(y ~ .-m,
+                  data = df,
+                  method = "lm",
+                  metric = my_metric,
+                  preProcess = c("center", "scale"),
+                  trControl = my_ctrl)
+```
+
+Additive features using the “expanded feature” set: 
+
+```{r}
+set.seed(825)
+fit_lm_expanded <- train(y ~ (x1+x2+x5+w+z),
+                  data = derived_df,
+                  method = "lm",
+                  metric = my_metric,
+                  preProcess = c("center", "scale"),
+                  trControl = my_ctrl)
+```
+
+Top ranked linear model from Part ii) 
+
+```{r}
+set.seed(825)
+fit_lm_top_ranked <- train(y ~ splines::ns(x1,df=4) * (w+z+x2+x3),
+                  data = derived_df,
+                  method = "lm",
+                  metric = my_metric,
+                  preProcess = c("center", "scale"),
+                  trControl = my_ctrl)
+
+```
+
+Another linear model from Part ii) 
+
+```{r}
+set.seed(825)
+fit_lm_choice <- train(y ~ x1*(.-x4-v1-w),
+                  data = derived_df,
+                  method = "lm",
+                  metric = my_metric,
+                  preProcess = c("center", "scale"),
+                  trControl = my_ctrl)
+
+```
+
+
+## Elastic Net: 
+
+Interact the categorical variable with all pair-wise interactions of the continuous features: 
+
+```{r}
+set.seed(825) 
+fit_enet_cc <- train(y ~ m*(I(x1)^2+I(x2)^2+I(x5)^2+I(w)^2+I(z)^2),
+                    data = derived_df,
+                    method = "glmnet",
+                    metric = my_metric,
+                    preProcess = c("center", "scale"),
+                    trControl = my_ctrl)
+
+```
+
+The most complex model tried in Part ii) 
+
+```{r}
+set.seed(825)
+fit_enet_complex <- train(y ~ splines::ns(x1,df=4) * (w+z+t+x2+x4),
+                    data = derived_df,
+                    method = "glmnet",
+                    metric = my_metric,
+                    preProcess = c("center", "scale"),
+                    trControl = my_ctrl)
+
+```
+
+## Neural Network: 
+
+Base Features: 
+
+```{r, nnet_base}
+set.seed(825)
+fit_nnet_base <- train(y ~ (.),
+                    data = df,
+                    method = "nnet",
+                    metric = my_metric,
+                    preProcess = c("center", "scale"),
+                    trControl = my_ctrl,
+                    trace = FALSE,
+                    linout = TRUE)
+
+```
+
+
+Expanded Features: 
+
+```{r, nnet_expanded}
+set.seed(825)
+fit_nnet_expanded <- train(y ~ (x1+x2+x5+w+z),
+                    data = derived_df,
+                    method = "nnet",
+                    metric = my_metric,
+                    preProcess = c("center", "scale"),
+                    trControl = my_ctrl,
+                    trace = FALSE,
+                    linout = TRUE)
+
+```
+
+
+##Random Forest: 
+
+Base Features: 
+
+```{r}
+set.seed(825)
+fit_rf_base <- train(y ~ (.),
+                data = df,
+                method = "rf",
+                metric = my_metric,
+                trControl = my_ctrl,
+                importance = TRUE)
+
+```
+
+Expanded Features: 
+
+```{r}
+set.seed(825)
+fit_rf_expanded <- train(y ~ (x1+x2+x5+w+z),
+                data = derived_df,
+                method = "rf",
+                metric = my_metric,
+                trControl = my_ctrl,
+                importance = TRUE)
+
+```
+
+
+##GBT: 
+
+Base Features: 
+
+
+```{r,warning=FALSE, message=FALSE}
+set.seed(825)
+fit_xgb_base <- train(y ~ (.),
+                 data = df,
+                 method = "xgbTree",
+                 metric = my_metric,
+                 trControl = my_ctrl,
+                 objective = 'reg:squarederror')
+
+```
+
+Try refining a tuning grid based off fit_xgb_base: 
+
+```{r, GBT_tuning_grid}
+set.seed(825)
+GBT_base_grid <-expand.grid(nrounds = seq(100, 700, by = 100),
+                        max_depth = c(3, 4, 5),
+                        eta = c(0.5*fit_xgb_base$bestTune$eta, fit_xgb_base$bestTune$eta),
+                        gamma = fit_xgb_base$bestTune$gamma,
+                        colsample_bytree = fit_xgb_base$bestTune$colsample_bytree,
+                        min_child_weight = fit_xgb_base$bestTune$min_child_weight,
+                        subsample = fit_xgb_base$bestTune$subsample)
+
+```
+
+```{r,warning=FALSE, message=FALSE}
+set.seed(825)
+fit_xgb_base_tuned <- train(y ~ (.),
+                 data = df,
+                 method = "xgbTree",
+                 tuneGrid = GBT_base_grid,
+                 metric = my_metric,
+                 trControl = my_ctrl,
+                 verbose = FALSE,
+                 objective = 'reg:squarederror')
+
+```
+
+Expanded Features: 
+
+```{r, warning=FALSE, message=FALSE}
+set.seed(825)
+fit_xgb_expanded <- train(y ~ (x1+x2+x5+w+z),
+                 data = derived_df,
+                 method = "xgbTree",
+                 metric = my_metric,
+                 trControl = my_ctrl,
+                 objective = 'reg:squarederror')
+```
+
+Try refining a tuning grid based off fit_xgb_expanded: 
+
+```{r}
+set.seed(825)
+GBT_expanded_grid <-expand.grid(nrounds = seq(100, 700, by = 100),
+                        max_depth = c(3, 4, 5),
+                        eta = c(0.5*fit_xgb_expanded$bestTune$eta, fit_xgb_expanded$bestTune$eta),
+                        gamma = fit_xgb_expanded$bestTune$gamma,
+                        colsample_bytree = fit_xgb_expanded$bestTune$colsample_bytree,
+                        min_child_weight = fit_xgb_expanded$bestTune$min_child_weight,
+                        subsample = fit_xgb_expanded$bestTune$subsample)
+
+```
+
+```{r}
+set.seed(825)
+fit_xgb_expanded_tuned <- train(y ~ (x1+x2+x5+w+z),
+                 data = derived_df,
+                 method = "xgbTree",
+                 tuneGrid = GBT_expanded_grid,
+                 metric = my_metric,
+                 trControl = my_ctrl,
+                 objective = 'reg:squarederror')
+
+```
+
+
+## Additional Methods: 
+
+Support Vector Machine (SVM): 
+
+```{r, fit_SVM}
+set.seed(825)
+fit_svm <- train(y ~ (x1+x2+x5+w+z),
+                 data = derived_df,
+                 method = "svmRadial",
+                 metric = my_metric,
+                 preProcess = c("center", "scale"),
+                 trControl = my_ctrl)
+
+```
+
+Multivariate Additive Regression Splines (MARS): 
+
+```{r, fit_MARS}
+
+MARS_grid <- hyper_grid <- expand.grid(
+                              degree = 1:3, 
+                              nprune = seq(2, 100, length.out = 10) %>% floor())
+set.seed(825)
+fit_MARS <- train(y ~ (x1+x2+x5+w+z),
+                 data = derived_df,
+                 method = "earth",
+                 metric = my_metric,
+                 tuneGrid = MARS_grid,
+                 preProcess = c("center", "scale"),
+                 trControl = my_ctrl)
+
+```
+
+## Compare models: 
+
+Compile the resampling results together: 
+
+```{r, compile_resample_results}
+my_results <- resamples(list(LINEAR_BASE = fit_lm_base,
+                             LINEAR_EXPANDED = fit_lm_expanded,
+                             LINEAR_TOP = fit_lm_top_ranked,
+                             LINEAR_CHOICE = fit_lm_choice,
+                             ENET_PAIRWISE = fit_enet_cc,
+                             ENET_COMPLEX = fit_enet_complex,
+                             NNET_BASE = fit_nnet_base, 
+                             NNET_EXPANDED = fit_nnet_expanded, 
+                             RF_BASE = fit_rf_base, 
+                             RF_EXPANDED = fit_rf_expanded, 
+                             XGB_EXPANDED = fit_xgb_expanded,
+                             XGB_EXPANDED_TUNED = fit_xgb_expanded_tuned, 
+                             XGB_BASE = fit_xgb_base, 
+                             XGB_BASE_TUNED = fit_xgb_base_tuned, 
+                             SVM = fit_svm, 
+                             MARS = fit_MARS))
+```
+
+
+Compare on RMSE: 
+
+
+```{r, RMSE_Analysis}
+dotplot(my_results, metric = "RMSE")
+```
+
+Comparing R-Squared: 
+
+
+```{r}
+dotplot(my_results, metric = "Rsquared")
+```
+
+Both metrics are in nearly perfect agreement. Based on both RMSE (the primary metric of interest) **and** R-Squared, the tuned XGB Expanded model is the best performing model 
+
+Saving Top Performing Models: 
+
+```{r, Save_Models}
+fit_rf_expanded %>% readr::write_rds("RF_EXPANDED.rds")
+fit_xgb_expanded %>% readr::write_rds("XGB_EXPANDED.rds")
+fit_MARS %>% readr::write_rds("MARS.rds")
+fit_xgb_expanded_tuned %>% readr::write_rds("XGB_EXPANDED_TUNED.rds")
+```
+

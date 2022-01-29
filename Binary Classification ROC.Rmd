@@ -1,0 +1,386 @@
+---
+title: "Rachel Jakielski CS1675 Final Project"
+output: html_document
+---
+
+***PART FOUR: Binary Classification (ROC Analysis)***
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(yardstick)
+library(caret)
+```
+
+
+Base Features: 
+
+```{r, base_df}
+df <- readr::read_csv("cs_1675_fall2021_finalproject.csv", col_names = TRUE)%>%
+  mutate(y = boot::logit(output))%>%
+              mutate(outcome = ifelse(output < 0.33, 'event', 'non_event'),
+              outcome = factor(outcome, levels = c("event", "non_event"))) %>% 
+              subset(select = c(-output, -y)) %>% glimpse()
+
+```
+
+Expanded Features: 
+
+```{r, derived_df}
+derived_df <- df %>% 
+              mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+                     w = x2 / (x3 + x4),
+                     z = (x1 + x2) / (x5 + x4),
+                     t = v1 * v2) %>% 
+              glimpse()
+```
+
+# Train By Maximizing ROC: 
+
+```{r, make_caret_info_setup}
+my_ctrl <- trainControl(method = "repeatedcv", 
+                        number = 5, repeats = 3, 
+                        summaryFunction = twoClassSummary, 
+                        classProbs = TRUE,
+                        savePredictions = TRUE,
+                        verboseIter = FALSE)
+
+roc <- "ROC"
+```
+
+
+## Logistic Regression: 
+
+Additive features using the base feature set: 
+
+```{r}
+set.seed(825)
+fit_lm_base_roc <- train(outcome ~ (.-m),
+                  data = df,
+                  method = "glm",
+                  metric = roc,
+                  preProcess = c("center", "scale"),
+                  trControl = my_ctrl)
+```
+
+Additive features using the expanded feature set: 
+
+```{r}
+set.seed(825)
+fit_lm_expanded_roc  <- train(outcome ~  (x1+x2+x5+w+z),
+                  data = derived_df,
+                  method = "glm",
+                  metric = roc,
+                  preProcess = c("center", "scale"),
+                  trControl = my_ctrl)
+```
+
+Top ranked linear model from Part ii): 
+
+```{r}
+set.seed(825)
+fit_lm_top_ranked_roc  <- train(outcome ~ splines::ns(x1,df=4) * (w+z+x2+x3),
+                  data = derived_df,
+                  method = "glm",
+                  metric = roc,
+                  preProcess = c("center", "scale"),
+                  trControl = my_ctrl)
+
+```
+
+Another linear model from Part ii): 
+
+```{r}
+set.seed(825)
+fit_lm_choice_roc  <- train(outcome ~ x1*(.-x4-v1-w),
+                  data = derived_df,
+                  method = "glm",
+                  metric = roc,
+                  preProcess = c("center", "scale"),
+                  trControl = my_ctrl)
+
+```
+
+
+## Elastic Net: 
+
+Interact the categorical variable with all pair-wise interactions of the continuous features:
+
+```{r, fit_mod_03} 
+set.seed(825)
+fit_enet_cc_roc <- train(outcome ~ m*(I(x1)^2+I(x2)^2+I(x5)^2+I(w)^2+I(z)^2),
+                    data = derived_df,
+                    method = "glmnet",
+                    metric = roc,
+                    preProcess = c("center", "scale"),
+                    trControl = my_ctrl)
+
+```
+
+The most complex model tried in Part ii): 
+
+```{r, fit_complex}
+set.seed(825)
+fit_enet_complex_roc <- train(outcome ~ splines::ns(x1,df=4) * (w+z+t+x2+x4),
+                    data = derived_df,
+                    method = "glmnet",
+                    metric = roc,
+                    preProcess = c("center", "scale"),
+                    trControl = my_ctrl)
+
+```
+
+## Neural Network: 
+
+Base Features: 
+
+```{r, nnet_base}
+set.seed(825)
+fit_nnet_base_roc <- train(outcome ~ (.-m),
+                    data = df,
+                    method = "nnet",
+                    metric = roc,
+                    preProcess = c("center", "scale"),
+                    trControl = my_ctrl,
+                    trace = FALSE)
+
+```
+
+
+Expanded Features: 
+
+```{r, nnet_expanded}
+set.seed(825)
+fit_nnet_expanded_roc <- train(outcome ~ (x1+x2+x5+w+z),
+                    data = derived_df,
+                    method = "nnet",
+                    metric = roc,
+                    preProcess = c("center", "scale"),
+                    trControl = my_ctrl,
+                    trace = FALSE)
+
+```
+
+
+## Random Forest: 
+
+Base Features:
+
+```{r}
+set.seed(825)
+fit_rf_base_roc <- train(outcome ~ (.-m),
+                data = df,
+                method = "rf",
+                metric = roc,
+                trControl = my_ctrl,
+                importance = TRUE)
+
+```
+
+Expanded Features:
+
+```{r}
+set.seed(825)
+fit_rf_expanded_roc <- train(outcome ~ (x1+x2+x5+w+z),
+                data = derived_df,
+                method = "rf",
+                metric = roc,
+                trControl = my_ctrl,
+                importance = TRUE)
+
+```
+
+## GBT: 
+
+Base Features: 
+
+
+```{r,warning=FALSE, message=FALSE}
+set.seed(825)
+fit_xgb_base_roc <- train(outcome ~ (.),
+                 data = df,
+                 method = "xgbTree",
+                 metric = roc,
+                 trControl = my_ctrl,
+                 objective = 'reg:squarederror')
+
+```
+
+Try refining a tuning grid based off fit_xgb_base: 
+
+```{r}
+
+GBT_base_grid_roc <-expand.grid(nrounds = seq(100, 700, by = 100),
+                        max_depth = c(3, 4, 5),
+                        eta = c(0.5*fit_xgb_base_roc$bestTune$eta, fit_xgb_base_roc$bestTune$eta),
+                        gamma = fit_xgb_base_roc$bestTune$gamma,
+                        colsample_bytree = fit_xgb_base_roc$bestTune$colsample_bytree,
+                        min_child_weight = fit_xgb_base_roc$bestTune$min_child_weight,
+                        subsample = fit_xgb_base_roc$bestTune$subsample)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+set.seed(825)
+fit_xgb_base_tuned_roc <- train(outcome ~ (.),
+                 data = df,
+                 method = "xgbTree",
+                 tuneGrid = GBT_base_grid_roc,
+                 metric = roc,
+                 trControl = my_ctrl,
+                 objective = 'reg:squarederror')
+
+```
+
+Expanded Features: 
+
+```{r, warning=FALSE, message=FALSE}
+set.seed(825)
+fit_xgb_expanded_roc <- train(outcome ~ (x1+x2+x5+w+z),
+                 data = derived_df,
+                 method = "xgbTree",
+                 metric = roc,
+                 trControl = my_ctrl,
+                 objective = 'reg:squarederror')
+```
+
+Try refining a tuning grid based off fit_xgb_expanded: 
+
+```{r}
+
+GBT_expanded_grid_roc <-expand.grid(nrounds = seq(100, 700, by = 100),
+                        max_depth = c(3, 4, 5),
+                        eta = c(0.5*fit_xgb_expanded_roc$bestTune$eta, fit_xgb_expanded_roc$bestTune$eta),
+                        gamma = fit_xgb_expanded_roc$bestTune$gamma,
+                        colsample_bytree = fit_xgb_expanded_roc$bestTune$colsample_bytree,
+                        min_child_weight = fit_xgb_expanded_roc$bestTune$min_child_weight,
+                        subsample = fit_xgb_expanded_roc$bestTune$subsample)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+set.seed(825)
+fit_xgb_expanded_tuned_roc <- train(outcome ~ (x1+x2+x5+w+z),
+                 data = derived_df,
+                 method = "xgbTree",
+                 tuneGrid = GBT_expanded_grid_roc,
+                 metric = roc,
+                 trControl = my_ctrl,
+                 objective = 'reg:squarederror')
+
+```
+
+## Additional Methods:
+
+Support Vector Machine (SVM): 
+
+```{r, fit_SVM}
+set.seed(825)
+fit_svm_roc <- train(outcome ~ (x1+x2+x5+w+z),
+                 data = derived_df,
+                 method = "svmRadial",
+                 metric = roc,
+                 preProcess = c("center", "scale"),
+                 trControl = my_ctrl)
+
+```
+
+Deep Neural Net: 
+
+```{r, fit_MARS}
+DNNgrid <- expand.grid(layer1 = 1:3,
+                     layer2 = 0, layer3 = 0,
+                     hidden_dropout = c(0, .1), 
+                     visible_dropout = 0)
+set.seed(825)
+fit_DNN_roc <- train(outcome ~  (x1+x2+x5+w+z),
+                 data = derived_df,
+                 method = "dnn",
+                 metric = roc,
+                 tuneGrid = DNNgrid,
+                 preProcess = c("center", "scale"),
+                 trControl = my_ctrl)
+
+```
+
+```{r, collect_metrics}
+my_ROC_results <- resamples(list(LINEAR_BASE_ROC = fit_lm_base_roc,
+                             LINEAR_EXPANDED_ROC = fit_lm_expanded_roc,
+                             LINEAR_TOP_ROC = fit_lm_top_ranked_roc,
+                             LINEAR_CHOICE_ROC = fit_lm_choice_roc,
+                             ENET_PAIRWISE_ROC = fit_enet_cc_roc,
+                             ENET_COMPLEX_ROC = fit_enet_complex_roc,
+                             NNET_BASE_ROC = fit_nnet_base_roc, 
+                             NNET_EXPANDED_ROC = fit_nnet_expanded_roc, 
+                             RF_BASE_ROC = fit_rf_base_roc, 
+                             RF_EXPANDED_ROC = fit_rf_expanded_roc, 
+                             XGB_EXPANDED_ROC = fit_xgb_expanded_roc,
+                             XGB_EXPANDED_TUNED_ROC = fit_xgb_expanded_tuned_roc, 
+                             XGB_BASE_ROC = fit_xgb_base_roc, 
+                             XGB_BASE_TUNED_ROC = fit_xgb_base_tuned_roc, 
+                             SVM_ROC = fit_svm_roc, 
+                             DNN_ROC= fit_DNN_roc))
+```
+
+## Model Analysis: 
+```{r}
+fit_nnet_base_roc$pred %>% tibble::as_tibble()
+```
+
+```{r}
+summary(my_ROC_results, metric = 'ROC')
+```
+
+```{r}
+dotplot(my_ROC_results)
+```
+
+Visualizing ROC for all models: 
+
+```{r, make_roc_compile_function}
+compile_all_model_preds <- function(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16)
+{
+  purrr::map2_dfr(list(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16),
+                  as.character(seq_along(list(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16))),
+                  function(ll, lm){
+                    ll$pred %>% tibble::as_tibble() %>% 
+                      select(obs, event, Resample) %>% 
+                      mutate(model_name = lm)
+                  })
+}
+```
+
+
+```{r}
+model_preds <- compile_all_model_preds(fit_lm_base_roc,
+                             fit_lm_expanded_roc,
+                             fit_lm_top_ranked_roc,
+                             fit_lm_choice_roc,
+                             fit_enet_cc_roc,
+                             fit_enet_complex_roc,
+                             fit_nnet_base_roc, 
+                             fit_nnet_expanded_roc, 
+                             fit_rf_base_roc, 
+                             fit_rf_expanded_roc, 
+                             fit_xgb_expanded_roc,
+                             fit_xgb_expanded_tuned_roc, 
+                             fit_xgb_base_roc, 
+                             fit_xgb_base_tuned_roc, 
+                             fit_svm_roc, 
+                             fit_DNN_roc)
+```
+
+```{r}
+model_preds%>%group_by(model_name)%>%roc_curve(obs,event)%>%autoplot()
+```
+
+The XGB, tuned GBT, and RF models yield the highest performance according to ROC. These results are consistent with analysis by accuracy as well. 
+
+Saving Top Performing Models: 
+
+```{r, Save_Models}
+fit_rf_expanded_roc %>% readr::write_rds("RF_EXPANDED_ROC.rds")
+fit_xgb_expanded_roc %>% readr::write_rds("XGB_EXPANDED_ROC.rds")
+fit_xgb_expanded_tuned_roc %>% readr::write_rds("XGB_EXPANDED_TUNED_ROC.rds")
+fit_svm_roc %>% readr::write_rds("SVM_ROC.rds")
+```

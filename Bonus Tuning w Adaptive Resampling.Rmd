@@ -1,0 +1,193 @@
+---
+title: "Rachel Jakielski CS1675 Final Project"
+output: html_document
+---
+
+***Bonus- Tuning with Adaptive Resampling*** 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr )
+library(caret)
+```
+
+Loading in data: 
+
+Base Features: 
+
+```{r, base_df}
+df <- readr::read_csv("cs_1675_fall2021_finalproject.csv", col_names = TRUE)%>%
+  mutate(y = boot::logit(output))%>%
+              mutate(outcome = ifelse(output < 0.33, 'event', 'non_event'),
+              outcome = factor(outcome, levels = c("event", "non_event"))) %>% 
+              subset(select = c(-output)) %>% glimpse()
+
+```
+Expanded Features: 
+
+```{r, derived_df}
+derived_df <- df %>% 
+              mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+                     w = x2 / (x3 + x4),
+                     z = (x1 + x2) / (x5 + x4),
+                     t = v1 * v2) %>% 
+              glimpse()
+```
+
+```{r}
+class_df <- derived_df %>% select(-y) %>% glimpse()
+reg_df <- derived_df%>%select(-outcome) %>% glimpse()
+```
+
+
+The top 3 performing models from both classification and regression will be tuned via adaptive resampling. The top 3 models (excluding the gradient boosted trees that were previously tuned) are: 
+
+Classification: 
+  1. Tuned GBT 
+  2. Original GBT  
+  3. Random Forest 
+
+Regression: 
+  1. Tuned GBT 
+  2. Original GBT 
+  3. Random Forest 
+  
+All of these Models were trained on the expanded features dataset. 
+  
+
+Load in models: 
+
+```{r, load_models}
+#Regression
+xgb_reg <- readr::read_rds("/Users/rachel/Desktop/CS1675/final project/Classification and Regression/Saved_Models/Regression/XGB_EXPANDED.rds")
+
+xgb_tuned_reg <- readr::read_rds("/Users/rachel/Desktop/CS1675/final project/Classification and Regression/Saved_Models/Regression/XGB_EXPANDED_TUNED.rds")
+
+MARS_reg <- readr::read_rds("/Users/rachel/Desktop/CS1675/final project/Classification and Regression/Saved_Models/Regression/MARS.rds")
+
+rf_reg <- readr::read_rds("/Users/rachel/Desktop/CS1675/final project/Classification and Regression/Saved_Models/Regression/RF_EXPANDED.rds")
+
+#Classification
+xgb_tuned_class <- readr::read_rds("/Users/rachel/Desktop/CS1675/final project/Classification and Regression/Saved_Models/Classification/Accuracy/XGB_EXPANDED_TUNED.rds")
+
+xgb_class <- readr::read_rds("/Users/rachel/Desktop/CS1675/final project/Classification and Regression/Saved_Models/Classification/Accuracy/XGB_EXPANDED_ACC.rds")
+
+rf_class <- readr::read_rds("/Users/rachel/Desktop/CS1675/final project/Classification and Regression/Saved_Models/Classification/Accuracy/RF_EXPANDED_ACC.rds")
+
+svm_class <- readr::read_rds("/Users/rachel/Desktop/CS1675/final project/Classification and Regression/Saved_Models/Classification/Accuracy/SVM_ACC.rds")
+```
+
+
+Set conditions for adaptive resampling: 
+
+```{r, adaptive_control}
+
+#trainControl(method = "repeatedcv", number = 5, repeats = 3)
+classControl <- trainControl(method = "adaptive_cv",
+                             number = 5, repeats = 3,
+                             adaptive = list(min = 5, alpha = 0.05, 
+                                             method = "gls", complete = TRUE))
+
+acc <- "Accuracy"
+
+
+
+regControl <- trainControl(method = "adaptive_cv",
+                             number = 5, repeats = 3,
+                             adaptive = list(min = 5, alpha = 0.05, 
+                                             method = "gls", complete = TRUE))
+
+rms <- "RMSE"
+```
+
+#Re-train models with adaptive control: 
+
+Classification:
+```{r, tune_xgb}
+
+#Classification
+set.seed(825)
+xgb_c_tune <- train(outcome ~ (x1+x2+x5+w+z), 
+                  data = class_df,
+                  method = "xgbTree", 
+                  trControl = classControl, 
+                  preProc = c("center", "scale"),
+                  metric = acc)
+```
+
+```{r, tune_rf}
+set.seed(825)
+rf_c_tune <- train(outcome ~ (x1+x2+x5+w+z), 
+                  data = class_df,
+                  method = "rf", 
+                  trControl = classControl, 
+                  preProc = c("center", "scale"),
+                  metric = acc)
+```
+
+```{r, tune_svm}
+set.seed(825)
+svm_c_tune <- train(outcome ~ (x1+x2+x5+w+z),
+                data = class_df,
+                method = "svmRadial", 
+                trControl = classControl, 
+                preProc = c("center", "scale"),
+                metric = acc)
+
+```
+
+```{r}
+my_ACC_results <- resamples(list(TUNED_XBTREE=xgb_tuned_class,
+                                 ADAPTIVE_RFOREST = rf_c_tune,
+                                 ADAPTIVE_XBTREE = xgb_c_tune,
+                                 ADAPTIVE_SVM = svm_c_tune,
+                                 SVM = svm_class,
+                                 RFOREST = rf_class,
+                                 XBTREE = xgb_class))
+```
+
+```{r}
+dotplot(my_ACC_results, metric = 'Accuracy')
+```
+
+
+# Regression: 
+```{r, tune_reg_xgb}
+set.seed(825)
+xgb_r_tune <- train(y ~ (x1+x2+x5+w+z), 
+                  data = reg_df,
+                  method = "xgbTree",
+                  metric = rms,
+                  trControl = regControl)
+
+```
+
+
+
+```{r, tune_reg_rf}
+set.seed(825)
+rf_r_tune <- train(y ~ (x1+x2+x5+w+z),
+                data = reg_df,
+                method = "rf",
+                metric = rms,
+                trControl = regControl,
+                importance = TRUE)
+
+```
+
+```{r}
+my_results <- resamples(list(ADAPTIVE_XGB = xgb_r_tune,
+                             ADAPTIVE_RF = rf_r_tune,
+                             XGB = xgb_reg,
+                             RF = rf_reg,
+                             TUNED_XGB = xgb_tuned_reg))
+```
+
+Compare on RMSE:
+```{r, RMSE_Analysis}
+dotplot(my_results, metric = "RMSE")
+```
+
+Adaptive tuning had minimal impact on model performance. Regarding the gradient boosted trees, the adaptive approach model only ranked marginally better than the original xgb, and still fell short of the originally tuned gbt. However, no model did *significantly* better than its alternatively trained version. 
+
+The adaptive tuned random forest model ranked below the original random forest. 

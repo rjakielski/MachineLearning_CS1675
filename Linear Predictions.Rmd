@@ -1,0 +1,141 @@
+---
+title: "Rachel Jakielski CS1675 Final Project"
+output: html_document
+---
+
+***PART TWO: Linear Predictions***
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(coefplot)
+library(ggplot2)
+```
+
+```{r, base_data}
+df<- readr::read_csv("cs_1675_fall2021_finalproject.csv", col_names = TRUE)
+df <- df %>% 
+      mutate(y = boot::logit(output)) 
+df <- subset(df, select = -output)
+
+glimpse(df)
+```
+
+```{r, derived_data}
+derived_df <- df %>% 
+              mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+                     w = x2 / (x3 + x4),
+                     z = (x1 + x2) / (x5 + x4),
+                     t = v1 * v2) %>% 
+              glimpse()
+#glimpse(derived_df) #<- subset(derived_df, select = -output)
+```
+
+
+top 2 models: 
+
+1. lbm_02, splines::ns(x1,df=4) * (w+z+x2+x3) 
+
+2. expanded_lm_03, y ~ (.-x4-v1-m)^2 
+
+
+```{r, grid_obj1}
+viz_grid_1 <- expand.grid(x1 = seq(min(derived_df$x1),
+                                       max(derived_df$x1),
+                                       length.out = 101),
+                       x2 = seq(min(derived_df$x2),
+                                    max(derived_df$x2),
+                                    length.out = 6),
+                       x3 = median(derived_df$x3),
+                       w = median(derived_df$w),
+                       z = median(derived_df$z),
+                       KEEP.OUT.ATTRS = FALSE,
+                       stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as.tibble()
+
+viz_grid_1 %>% glimpse()
+
+```
+
+```{r, grid_obj2}
+
+viz_grid_2 <- expand.grid(x1 = seq(min(derived_df$x1),
+                                       max(derived_df$x1),
+                                       length.out = 101),
+                       x2 = seq(min(derived_df$x2),
+                                    max(derived_df$x2),
+                                    length.out = 6),
+                       x3 = median(derived_df$x3),
+                       v2 = median(derived_df$v2),
+                       v3 = median(derived_df$v3),
+                       v4 = median(derived_df$v4),
+                       v5 = median(derived_df$v5),
+                       x5 = median(derived_df$x5),
+                       w = median(derived_df$w),
+                       z = median(derived_df$z),
+                       t = median(derived_df$t),
+                       KEEP.OUT.ATTRS = FALSE,
+                       stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as.tibble()
+
+viz_grid_2 %>% glimpse()
+
+```
+
+```{r}
+
+lm1 <- lm(y ~ splines::ns(x1,df=4) * (w+z+x2+x3), 
+                 data = derived_df)
+
+lm2 <- lm(y ~ I(x1)^2+I(x2)^2+I(x3)^2+I(x5)^2+I(v2)^2+I(v3)^2+I(v4)^2+I(v5)^2+I(w)^2+I(t)^2+I(z)^2, 
+                   data = derived_df)
+```
+
+```{r}
+
+tidy_predict <- function(mod, xnew)
+{
+  pred_df <- predict(mod, xnew, interval = "confidence") %>% 
+    as.data.frame() %>% tibble::as_tibble() %>% 
+    dplyr::select(pred = fit, ci_lwr = lwr, ci_upr = upr) %>% 
+    bind_cols(predict(mod, xnew, interval = 'prediction') %>% 
+                as.data.frame() %>% tibble::as_tibble() %>% 
+                dplyr::select(pred_lwr = lwr, pred_upr = upr))
+  
+  xnew %>% bind_cols(pred_df)
+}
+
+```
+
+```{r, make_predictions}
+
+pred_lm_01 <- tidy_predict(lm1,viz_grid_1)
+
+pred_lm_02 <- tidy_predict(lm2,viz_grid_2)
+
+```
+
+
+```{r}
+
+pred_lm_01 %>% ggplot(mapping = aes(x=x1)) +
+  geom_ribbon(aes(ymin = pred_lwr, ymax = pred_upr), fill = 'green') +
+  geom_ribbon(aes(ymin=ci_lwr, ymax=ci_upr), fill = 'grey') +
+  geom_line(aes(y=pred)) +
+  facet_wrap(~x2) + coord_cartesian(ylim=c(-10,10))
+
+```
+
+```{r}
+
+pred_lm_02 %>% ggplot(mapping = aes(x=x1)) +
+  geom_ribbon(aes(ymin = pred_lwr, ymax = pred_upr), fill = 'green') +
+  geom_ribbon(aes(ymin=ci_lwr, ymax=ci_upr), fill = 'grey') +
+  geom_line(aes(y=pred)) +
+  facet_wrap(~x2) + coord_cartesian(ylim=c(-10,10))
+
+```
+
+The predictions are not the same between models. Overall, the confidence interval on the splines model (top) is much tighter compared with the intervals on the interactions model (bottom). The splines model also has a smaller prediction interval “shell”, relative to the bottom model. 
