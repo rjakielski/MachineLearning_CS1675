@@ -2,7 +2,7 @@
 This repository contains all files for my personal term project for CS 1675 Introduction to Machine Learning (fall 2021). The goal of this project was to train a combination of classification and regression models to predict the fraction of corroded surface per test, based on coating material inputs. This project was sponsored by PPG Industries. 
 
 ## Models Trained
-- Linear (additive + spline)
+- Linear 
 - Elastic Net 
 - Neural Network
 - Random Forest
